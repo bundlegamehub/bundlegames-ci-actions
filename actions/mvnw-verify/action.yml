@@ -1,0 +1,63 @@
+name: mvnw-verify
+description: >-
+  Checkout, set up Temurin JDK, restore Maven cache, run ./mvnw verify. Used by
+  every JVM backend in the workspace. Defaults to Java 25 + Maven 3.9 matching
+  the BundleGames toolchain matrix.
+author: BundleGames
+
+inputs:
+  java-version:
+    description: Temurin major version.
+    required: false
+    default: "25"
+  test-group:
+    description: |
+      Which tests to run. Options:
+        unit        — unit tests only (`-DexcludedGroups=integration`)
+        integration — full `mvnw verify` (unit + Testcontainers IT + detekt)
+        none        — skip all tests (compile + detekt only)
+    required: false
+    default: "unit"
+  working-directory:
+    description: Directory containing `pom.xml`.
+    required: false
+    default: "."
+  maven-args:
+    description: Extra flags to append to the mvnw command.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Set up JDK ${{ inputs.java-version }}
+      uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+        cache: maven
+
+    - name: Run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        case "${{ inputs.test-group }}" in
+          unit)
+            ./mvnw -B -DexcludedGroups=integration test ${{ inputs.maven-args }}
+            ;;
+          integration)
+            ./mvnw -B verify ${{ inputs.maven-args }}
+            ;;
+          none)
+            ./mvnw -B -DskipTests verify ${{ inputs.maven-args }}
+            ;;
+          *)
+            echo "Unknown test-group: ${{ inputs.test-group }}" >&2
+            exit 1
+            ;;
+        esac

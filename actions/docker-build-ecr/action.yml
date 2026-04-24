@@ -1,0 +1,72 @@
+name: docker-build-ecr
+description: >-
+  Build a Docker image from the repo's Dockerfile, tag with the git SHA, push
+  to AWS ECR. Auth via OIDC (no long-lived keys). Use this in tag-triggered
+  release workflows, not on every push.
+author: BundleGames
+
+inputs:
+  aws-region:
+    description: ECR region.
+    required: true
+  aws-role-arn:
+    description: IAM role ARN with `ecr:PutImage` on the target repo (assumed via OIDC).
+    required: true
+  ecr-repository:
+    description: ECR repo name (without registry prefix).
+    required: true
+  dockerfile:
+    description: Path to Dockerfile.
+    required: false
+    default: "./Dockerfile"
+  build-context:
+    description: Build context directory.
+    required: false
+    default: "."
+  additional-tags:
+    description: Comma-separated additional tags to apply in addition to the git SHA (e.g. "latest,release").
+    required: false
+    default: ""
+
+outputs:
+  image:
+    description: Fully-qualified image pushed (with SHA tag).
+    value: ${{ steps.push.outputs.image }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Login to ECR
+      id: login
+      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+    - name: Build + push
+      id: push
+      shell: bash
+      run: |
+        set -euo pipefail
+        registry="${{ steps.login.outputs.registry }}"
+        sha="${GITHUB_SHA::12}"
+        primary="${registry}/${{ inputs.ecr-repository }}:${sha}"
+
+        docker build -f "${{ inputs.dockerfile }}" -t "${primary}" "${{ inputs.build-context }}"
+
+        # Additional tags (optional).
+        IFS=',' read -ra extras <<<"${{ inputs.additional-tags }}"
+        for extra in "${extras[@]}"; do
+          extra="$(echo "${extra}" | xargs)"
+          [[ -z "${extra}" ]] && continue
+          docker tag "${primary}" "${registry}/${{ inputs.ecr-repository }}:${extra}"
+        done
+
+        docker push --all-tags "${registry}/${{ inputs.ecr-repository }}"
+        echo "image=${primary}" >> "$GITHUB_OUTPUT"

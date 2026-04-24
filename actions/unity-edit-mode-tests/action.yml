@@ -1,0 +1,63 @@
+name: unity-edit-mode-tests
+description: >-
+  Run Unity edit-mode tests via game-ci/unity-test-runner. Gated on
+  UNITY_LICENSE + UNITY_EMAIL + UNITY_PASSWORD secrets — if any are missing the
+  action logs a clear skip message and succeeds, so repos can keep the
+  workflow enabled before licensing lands.
+author: BundleGames
+
+inputs:
+  project-path:
+    description: Path to the Unity project containing Assets/ and ProjectSettings/.
+    required: false
+    default: "."
+  unity-version:
+    description: Unity editor version. Leave empty to autodetect from ProjectSettings/ProjectVersion.txt.
+    required: false
+    default: ""
+  test-mode:
+    description: editmode or playmode or all
+    required: false
+    default: "editmode"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        lfs: true
+
+    - name: Check licensing
+      id: license
+      shell: bash
+      run: |
+        if [[ -z "${UNITY_LICENSE:-}" || -z "${UNITY_EMAIL:-}" || -z "${UNITY_PASSWORD:-}" ]]; then
+          echo "UNITY_LICENSE / UNITY_EMAIL / UNITY_PASSWORD not all set — skipping Unity test run." >&2
+          echo "Set them in repo secrets once a Unity license is available; this job will activate automatically." >&2
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Cache Library
+      if: steps.license.outputs.enabled == 'true'
+      uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      with:
+        path: ${{ inputs.project-path }}/Library
+        key: Library-${{ hashFiles(format('{0}/Packages/**', inputs.project-path), format('{0}/ProjectSettings/**', inputs.project-path)) }}
+        restore-keys: |
+          Library-
+
+    - name: Run Unity tests
+      if: steps.license.outputs.enabled == 'true'
+      uses: game-ci/unity-test-runner@e1bcc01f44ec8ed5b35a7ab0a2d39e2b01e02a0c # v4.3.1
+      env:
+        UNITY_LICENSE: ${{ env.UNITY_LICENSE }}
+        UNITY_EMAIL: ${{ env.UNITY_EMAIL }}
+        UNITY_PASSWORD: ${{ env.UNITY_PASSWORD }}
+      with:
+        projectPath: ${{ inputs.project-path }}
+        unityVersion: ${{ inputs.unity-version || 'auto' }}
+        testMode: ${{ inputs.test-mode }}
+        artifactsPath: ${{ inputs.project-path }}/artifacts

@@ -1,0 +1,100 @@
+name: package-tag-release
+description: >-
+  On tag push in a multi-package UPM repo, verify the tagged package's
+  `package.json` version matches the tag suffix, then create a GitHub Release
+  with the CHANGELOG section for that version. Fails CI if the version and tag
+  disagree — catches the exact class of drift where you forget to bump
+  `package.json` before tagging.
+author: BundleGames
+
+inputs:
+  tag:
+    description: The full tag name, e.g. `multiplayer-v0.2.0` or `v0.4.0`.
+    required: true
+  package-prefix:
+    description: >-
+      Tag prefix for this package. Use `multiplayer-` when the tag is
+      `multiplayer-v0.2.0`; leave empty when the tag is `v0.4.0` (legacy
+      single-package convention).
+    required: false
+    default: ""
+  package-path:
+    description: Path to the package folder containing `package.json`.
+    required: true
+  changelog-path:
+    description: Relative path to the package's CHANGELOG.md (falls back to `${package-path}/CHANGELOG.md`).
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: Version extracted from the tag.
+    value: ${{ steps.parse.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse tag
+      id: parse
+      shell: bash
+      run: |
+        set -euo pipefail
+        tag="${{ inputs.tag }}"
+        prefix="${{ inputs.package-prefix }}"
+        expected_pattern="^${prefix}v(.+)$"
+        if [[ ! "${tag}" =~ ${expected_pattern} ]]; then
+          echo "Tag '${tag}' does not match pattern '${prefix}vX.Y.Z'." >&2
+          exit 1
+        fi
+        version="${BASH_REMATCH[1]}"
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+        echo "Tag version: ${version}"
+
+    - name: Verify package.json version matches tag
+      shell: bash
+      run: |
+        set -euo pipefail
+        pkg="${{ inputs.package-path }}/package.json"
+        [[ -f "${pkg}" ]] || { echo "Missing ${pkg}" >&2; exit 1; }
+        declared="$(python3 -c "import json,sys; print(json.load(open('${pkg}'))['version'])")"
+        expected="${{ steps.parse.outputs.version }}"
+        if [[ "${declared}" != "${expected}" ]]; then
+          echo "Version mismatch: tag says '${expected}', ${pkg} says '${declared}'." >&2
+          echo "Bump package.json before tagging (or retag in place after fixing)." >&2
+          exit 1
+        fi
+        echo "OK — ${pkg} declares ${declared}"
+
+    - name: Extract CHANGELOG section
+      id: changelog
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="${{ steps.parse.outputs.version }}"
+        changelog="${{ inputs.changelog-path }}"
+        [[ -n "${changelog}" ]] || changelog="${{ inputs.package-path }}/CHANGELOG.md"
+        if [[ ! -f "${changelog}" ]]; then
+          echo "No CHANGELOG found at ${changelog}; skipping release body." >&2
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "Release ${version}" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # Extract the section between ## [<version>] and the next ## heading.
+        body="$(awk -v v="${version}" '
+          $0 ~ "^## \\[" v "\\]" { capture=1; next }
+          capture && /^## \[/ { exit }
+          capture { print }
+        ' "${changelog}")"
+        {
+          echo "body<<EOF"
+          printf '%s\n' "${body:-Release ${version}}"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+      with:
+        tag_name: ${{ inputs.tag }}
+        name: ${{ inputs.tag }}
+        body: ${{ steps.changelog.outputs.body }}
