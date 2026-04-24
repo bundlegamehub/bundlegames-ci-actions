@@ -1,8 +1,8 @@
 name: mvnw-verify
 description: >-
-  Checkout, set up Temurin JDK, restore Maven cache, run ./mvnw verify. Used by
-  every JVM backend in the workspace. Defaults to Java 25 + Maven 3.9 matching
-  the BundleGames toolchain matrix.
+  Checkout, set up Temurin JDK, restore Maven cache, run ./mvnw. Supports
+  private GitHub Packages auth. Defaults to Java 25 + Maven 3.9 matching the
+  BundleGames toolchain matrix.
 author: BundleGames
 
 inputs:
@@ -15,7 +15,8 @@ inputs:
       Which tests to run. Options:
         unit        — unit tests only (`-DexcludedGroups=integration`)
         integration — full `mvnw verify` (unit + Testcontainers IT + detekt)
-        none        — skip all tests (compile + detekt only)
+        detekt      — `./mvnw -B -DskipTests detekt:check`
+        none        — skip all tests (compile + detekt)
     required: false
     default: "unit"
   working-directory:
@@ -26,6 +27,14 @@ inputs:
     description: Extra flags to append to the mvnw command.
     required: false
     default: ""
+  github-packages-username:
+    description: GitHub Packages username — pass via `secrets.BUNDLEGAMES_PACKAGES_USERNAME`. Required when consuming bundlegames-spring-packages from GitHub Packages.
+    required: false
+    default: ""
+  github-packages-token:
+    description: GitHub Packages token — pass via `secrets.BUNDLEGAMES_PACKAGES_TOKEN`.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -33,16 +42,30 @@ runs:
     - name: Checkout
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+    - name: Validate GitHub Packages credentials
+      if: inputs.github-packages-username != '' || inputs.github-packages-token != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        [[ -n "${{ inputs.github-packages-username }}" ]] || { echo "github-packages-username passed but empty" >&2; exit 1; }
+        [[ -n "${{ inputs.github-packages-token }}" ]]    || { echo "github-packages-token passed but empty" >&2; exit 1; }
+
     - name: Set up JDK ${{ inputs.java-version }}
       uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
       with:
         distribution: temurin
         java-version: ${{ inputs.java-version }}
         cache: maven
+        server-id: github
+        server-username: BUNDLEGAMES_PACKAGES_USERNAME
+        server-password: BUNDLEGAMES_PACKAGES_TOKEN
 
     - name: Run
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        BUNDLEGAMES_PACKAGES_USERNAME: ${{ inputs.github-packages-username }}
+        BUNDLEGAMES_PACKAGES_TOKEN: ${{ inputs.github-packages-token }}
       run: |
         set -euo pipefail
 
@@ -52,6 +75,9 @@ runs:
             ;;
           integration)
             ./mvnw -B verify ${{ inputs.maven-args }}
+            ;;
+          detekt)
+            ./mvnw -B -DskipTests detekt:check ${{ inputs.maven-args }}
             ;;
           none)
             ./mvnw -B -DskipTests verify ${{ inputs.maven-args }}
