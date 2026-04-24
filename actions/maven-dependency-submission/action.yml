@@ -1,0 +1,60 @@
+name: maven-dependency-submission
+description: >-
+  Submit Maven dependency graph to GitHub's Dependency Graph API with proper
+  GitHub Packages auth so POM imports like bundlegames-spring-bom resolve.
+  Replaces GitHub's automatic "dynamic / submit-maven" job, which fails with
+  401 against private registries. Intended for on: push to main.
+author: BundleGames
+
+inputs:
+  java-version:
+    description: Temurin major version. Matches mvnw-verify default.
+    required: false
+    default: "25"
+  github-packages-username:
+    description: GitHub Packages username — pass secrets.BUNDLEGAMES_PACKAGES_USERNAME.
+    required: true
+  github-packages-token:
+    description: GitHub Packages token — pass secrets.BUNDLEGAMES_PACKAGES_TOKEN.
+    required: true
+  github-token:
+    description: GITHUB_TOKEN for submitting the dependency snapshot.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Export GitHub Packages credentials
+      shell: bash
+      env:
+        GHP_USERNAME: ${{ inputs.github-packages-username }}
+        GHP_TOKEN: ${{ inputs.github-packages-token }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${GHP_USERNAME}" || -z "${GHP_TOKEN}" ]]; then
+          echo "github-packages-username / github-packages-token inputs required" >&2
+          exit 1
+        fi
+        echo "::add-mask::${GHP_TOKEN}"
+        {
+          echo "BUNDLEGAMES_PACKAGES_USERNAME=${GHP_USERNAME}"
+          echo "BUNDLEGAMES_PACKAGES_TOKEN=${GHP_TOKEN}"
+        } >> "$GITHUB_ENV"
+
+    - name: Set up JDK ${{ inputs.java-version }}
+      uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+        cache: maven
+        server-id: github
+        server-username: BUNDLEGAMES_PACKAGES_USERNAME
+        server-password: BUNDLEGAMES_PACKAGES_TOKEN
+
+    - name: Submit Maven dependency graph
+      uses: advanced-security/maven-dependency-submission-action@5f64add2fe7d34039a236a96cae2c3ecb69c3fcb # v4.1.2
+      with:
+        token: ${{ inputs.github-token }}
