@@ -42,13 +42,32 @@ runs:
     - name: Checkout
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-    - name: Validate GitHub Packages credentials
+    - name: Export GitHub Packages credentials to environment
+      # Write the creds to $GITHUB_ENV so every subsequent step (setup-java's
+      # settings.xml rendering + mvnw) sees them. Mask the token so it's
+      # scrubbed from logs. Composite-level step env: blocks don't reliably
+      # propagate into setup-java's settings.xml rendering; job-level env or
+      # $GITHUB_ENV does.
       if: inputs.github-packages-username != '' || inputs.github-packages-token != ''
       shell: bash
+      env:
+        GHP_USERNAME: ${{ inputs.github-packages-username }}
+        GHP_TOKEN: ${{ inputs.github-packages-token }}
       run: |
         set -euo pipefail
-        [[ -n "${{ inputs.github-packages-username }}" ]] || { echo "github-packages-username passed but empty" >&2; exit 1; }
-        [[ -n "${{ inputs.github-packages-token }}" ]]    || { echo "github-packages-token passed but empty" >&2; exit 1; }
+        if [[ -z "${GHP_USERNAME}" ]]; then
+          echo "github-packages-username passed but empty" >&2
+          exit 1
+        fi
+        if [[ -z "${GHP_TOKEN}" ]]; then
+          echo "github-packages-token passed but empty" >&2
+          exit 1
+        fi
+        echo "::add-mask::${GHP_TOKEN}"
+        {
+          echo "BUNDLEGAMES_PACKAGES_USERNAME=${GHP_USERNAME}"
+          echo "BUNDLEGAMES_PACKAGES_TOKEN=${GHP_TOKEN}"
+        } >> "$GITHUB_ENV"
 
     - name: Set up JDK ${{ inputs.java-version }}
       uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
@@ -64,26 +83,25 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        BUNDLEGAMES_PACKAGES_USERNAME: ${{ inputs.github-packages-username }}
-        BUNDLEGAMES_PACKAGES_TOKEN: ${{ inputs.github-packages-token }}
+        TEST_GROUP: ${{ inputs.test-group }}
+        MAVEN_ARGS: ${{ inputs.maven-args }}
       run: |
         set -euo pipefail
-
-        case "${{ inputs.test-group }}" in
+        case "${TEST_GROUP}" in
           unit)
-            ./mvnw -B -DexcludedGroups=integration test ${{ inputs.maven-args }}
+            ./mvnw -B -DexcludedGroups=integration test ${MAVEN_ARGS}
             ;;
           integration)
-            ./mvnw -B verify ${{ inputs.maven-args }}
+            ./mvnw -B verify ${MAVEN_ARGS}
             ;;
           detekt)
-            ./mvnw -B -DskipTests detekt:check ${{ inputs.maven-args }}
+            ./mvnw -B -DskipTests detekt:check ${MAVEN_ARGS}
             ;;
           none)
-            ./mvnw -B -DskipTests verify ${{ inputs.maven-args }}
+            ./mvnw -B -DskipTests verify ${MAVEN_ARGS}
             ;;
           *)
-            echo "Unknown test-group: ${{ inputs.test-group }}" >&2
+            echo "Unknown test-group: ${TEST_GROUP}" >&2
             exit 1
             ;;
         esac

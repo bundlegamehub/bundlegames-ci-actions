@@ -24,7 +24,24 @@ runs:
       with:
         python-version: "3.12"
 
+    - name: Resolve pre-commit ref range
+      # Avoid nested ${{ }} — GitHub won't interpolate the inner expression,
+      # so we compute the pre-commit args in a shell step and hand them to
+      # the action via env.
+      id: args
+      shell: bash
+      env:
+        ALL_FILES: ${{ inputs.all-files }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -euo pipefail
+        if [[ "${ALL_FILES}" == "true" || -z "${BASE_REF}" ]]; then
+          echo "extra=--all-files" >> "$GITHUB_OUTPUT"
+        else
+          echo "extra=--from-ref origin/${BASE_REF} --to-ref HEAD" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Run pre-commit
       uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
       with:
-        extra_args: ${{ inputs.all-files == 'true' && '--all-files' || '--from-ref origin/${{ github.base_ref }} --to-ref HEAD' }}
+        extra_args: ${{ steps.args.outputs.extra }}
