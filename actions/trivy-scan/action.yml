@@ -38,10 +38,11 @@ inputs:
   upload-sarif:
     description: >-
       Upload SARIF results to GitHub Code Scanning. Requires `security-events:
-      write` on the calling job and GHAS-eligible repos. Set to `false` for
-      repos without GHAS.
+      write` on the calling job and a GHAS-eligible repo. Defaults to `false`
+      so the composite works on every repo out of the box; flip to `true` per
+      repo (or fleet-wide via the composite default) once GHAS is enabled.
     required: false
-    default: "true"
+    default: "false"
   sarif-category:
     description: "Category for the uploaded SARIF (lets multiple Trivy passes coexist on one repo)."
     required: false
