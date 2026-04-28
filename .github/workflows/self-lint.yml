@@ -17,6 +17,7 @@ jobs:
       - uses: ./actions/pre-commit-check
         with:
           all-files: "true"
+          checkout: "false"
 
   shellcheck:
     runs-on: ubuntu-24.04

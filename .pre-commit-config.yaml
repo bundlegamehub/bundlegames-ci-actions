@@ -6,6 +6,13 @@
 # which is also installed by scripts/install-shared-config.sh — keep them
 # in sync.
 
+# Unity-managed assets are auto-generated YAML/JSON with idiosyncratic
+# formatting (trailing whitespace, missing final newlines). Pre-commit
+# whitespace fixers must not rewrite them — Unity will revert anything we
+# normalize on the next save and a perpetual diff war ensues. Files with
+# real handwritten content (.cs, .asmdef, .json) are still in scope.
+exclude: '\.(meta|asset|prefab|unity|anim|controller|mat|inputactions|guiskin|fontsettings|playable|preset|signal|signallist|terrainlayer|brush|spriteatlas|spriteatlasv2|shadergraph|shadersubgraph)$'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
