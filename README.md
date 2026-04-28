@@ -15,6 +15,7 @@ Today this lives under `shared/packages/` for convenience. The intent is for eac
 | `actions/unity-edit-mode-tests` | Runs `game-ci/unity-test-runner`. Gated on `UNITY_LICENSE` / `UNITY_EMAIL` / `UNITY_PASSWORD` secrets being present; no-op when they aren't (so the workflow can stay enabled before licensing). |
 | `actions/docker-build-ecr` | Build, tag with git SHA, push to AWS ECR via OIDC. |
 | `actions/pre-commit-check` | Run `pre-commit run --all-files` with a standardized hook set. |
+| `actions/trivy-scan` | Trivy fs/image vulnerability scan with DB caching, public ECR mirror, optional SARIF upload to GitHub Code Scanning. One pin to bump fleet-wide. |
 
 ## Conventions
 

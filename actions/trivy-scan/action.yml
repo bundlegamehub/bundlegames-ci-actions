@@ -1,0 +1,158 @@
+name: trivy-scan
+description: >-
+  Run Trivy vulnerability scanning on a filesystem path or container image.
+  SHA-pins Trivy. Caches the Trivy DB and routes pulls through the public ECR
+  mirror to avoid GHCR rate-limit flakes. Optionally uploads SARIF results to
+  GitHub Code Scanning (requires `security-events: write` on the calling job).
+author: BundleGames
+
+inputs:
+  scan-type:
+    description: "What to scan. `fs` (filesystem) or `image` (container image)."
+    required: false
+    default: "fs"
+  scan-ref:
+    description: "Path to scan when scan-type=fs. Defaults to repo root."
+    required: false
+    default: "."
+  image-ref:
+    description: "Image reference (registry/name:tag or @digest) when scan-type=image."
+    required: false
+    default: ""
+  severity:
+    description: "Comma-separated severities to surface."
+    required: false
+    default: "CRITICAL,HIGH"
+  exit-code:
+    description: "Exit code when matching vulnerabilities are found. `1` = fail build, `0` = advisory only."
+    required: false
+    default: "1"
+  ignore-unfixed:
+    description: "Ignore CVEs without an available fix (cuts noise from upstream-pending CVEs)."
+    required: false
+    default: "true"
+  vuln-type:
+    description: "Vulnerability classes to scan."
+    required: false
+    default: "os,library"
+  upload-sarif:
+    description: >-
+      Upload SARIF results to GitHub Code Scanning. Requires `security-events:
+      write` on the calling job and GHAS-eligible repos. Set to `false` for
+      repos without GHAS.
+    required: false
+    default: "true"
+  sarif-category:
+    description: "Category for the uploaded SARIF (lets multiple Trivy passes coexist on one repo)."
+    required: false
+    default: ""
+  trivy-db-repository:
+    description: "Override Trivy DB source. Default uses the public ECR mirror to avoid GHCR rate limits."
+    required: false
+    default: "public.ecr.aws/aquasecurity/trivy-db:2"
+  trivy-java-db-repository:
+    description: "Override Trivy Java DB source. Default uses the public ECR mirror."
+    required: false
+    default: "public.ecr.aws/aquasecurity/trivy-java-db:1"
+  checkout:
+    description: "If true, run actions/checkout. Set to false when the calling job has already checked out."
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        SCAN_TYPE: ${{ inputs.scan-type }}
+        IMAGE_REF: ${{ inputs.image-ref }}
+      run: |
+        set -euo pipefail
+        case "${SCAN_TYPE}" in
+          fs|image) ;;
+          *)
+            echo "scan-type must be 'fs' or 'image' (got: ${SCAN_TYPE})" >&2
+            exit 1
+            ;;
+        esac
+        if [[ "${SCAN_TYPE}" == "image" && -z "${IMAGE_REF}" ]]; then
+          echo "scan-type=image requires image-ref to be set" >&2
+          exit 1
+        fi
+
+    - name: Checkout
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Resolve Trivy DB cache key
+      id: cache-key
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Day-bucketed key — DB refreshes daily, matches the schedule that
+        # most consumer workflows already use.
+        echo "today=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Trivy DB
+      uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      with:
+        path: ~/.cache/trivy
+        key: trivy-db-${{ runner.os }}-${{ steps.cache-key.outputs.today }}
+        restore-keys: |
+          trivy-db-${{ runner.os }}-
+
+    - name: Resolve SARIF category default
+      id: sarif
+      shell: bash
+      env:
+        EXPLICIT: ${{ inputs.sarif-category }}
+        SCAN_TYPE: ${{ inputs.scan-type }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${EXPLICIT}" ]]; then
+          echo "category=${EXPLICIT}" >> "$GITHUB_OUTPUT"
+        else
+          echo "category=trivy-${SCAN_TYPE}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Trivy scan (fs)
+      if: inputs.scan-type == 'fs'
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      env:
+        TRIVY_DB_REPOSITORY: ${{ inputs.trivy-db-repository }}
+        TRIVY_JAVA_DB_REPOSITORY: ${{ inputs.trivy-java-db-repository }}
+      with:
+        scan-type: fs
+        scan-ref: ${{ inputs.scan-ref }}
+        format: ${{ inputs.upload-sarif == 'true' && 'sarif' || 'table' }}
+        output: ${{ inputs.upload-sarif == 'true' && 'trivy-results.sarif' || '' }}
+        severity: ${{ inputs.severity }}
+        ignore-unfixed: ${{ inputs.ignore-unfixed }}
+        vuln-type: ${{ inputs.vuln-type }}
+        exit-code: ${{ inputs.exit-code }}
+
+    - name: Trivy scan (image)
+      if: inputs.scan-type == 'image'
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      env:
+        TRIVY_DB_REPOSITORY: ${{ inputs.trivy-db-repository }}
+        TRIVY_JAVA_DB_REPOSITORY: ${{ inputs.trivy-java-db-repository }}
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image-ref }}
+        format: ${{ inputs.upload-sarif == 'true' && 'sarif' || 'table' }}
+        output: ${{ inputs.upload-sarif == 'true' && 'trivy-results.sarif' || '' }}
+        severity: ${{ inputs.severity }}
+        ignore-unfixed: ${{ inputs.ignore-unfixed }}
+        vuln-type: ${{ inputs.vuln-type }}
+        exit-code: ${{ inputs.exit-code }}
+
+    - name: Upload SARIF to GitHub Code Scanning
+      # Run even if Trivy failed the build — we still want findings visible
+      # in the Security tab.
+      if: always() && inputs.upload-sarif == 'true' && hashFiles('trivy-results.sarif') != ''
+      uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+      with:
+        sarif_file: trivy-results.sarif
+        category: ${{ steps.sarif.outputs.category }}
