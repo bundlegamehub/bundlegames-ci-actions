@@ -1,0 +1,14 @@
+# BundleGames shared typos allowlist. Install into each repo as `typos.toml`
+# at the repo root via scripts/install-shared-config.sh. The pre-commit
+# `typos` hook reads this automatically.
+#
+# Add identifiers that the upstream `typos` corpus flags as misspellings
+# but are real acronyms / domain terms in our codebase. Keep this list
+# narrow — every entry is a guard rail against catching a *real* typo of
+# that word.
+
+[default.extend-words]
+# Google Ad Manager — the ad platform we route through in the
+# monetization Unity package and various WebGL host bridge code.
+GAM = "GAM"
+GAMs = "GAMs"
