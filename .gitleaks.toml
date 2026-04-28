@@ -1,0 +1,21 @@
+# BundleGames shared gitleaks baseline. Extends the default rule set.
+# Copy into each repo via scripts/install-shared-config.sh (renamed to
+# `.gitleaks.toml` at the repo root).
+
+title = "BundleGames baseline"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Paths + patterns allowed across all BundleGames repos"
+paths = [
+  # Editor bootstrap files are generated per-dev, may contain fake tokens.
+  '''Assets/Bundle/.+/Configs/multiplayer-editor-bootstrap\.local\.json''',
+  # Gitleaks self-tests / fixtures
+  '''.*\.test\.yaml$''',
+]
+regexes = [
+  # Local-dev JWT secret; explicitly a placeholder, never shipped to prod.
+  '''01234567890123456789012345678901''',
+]

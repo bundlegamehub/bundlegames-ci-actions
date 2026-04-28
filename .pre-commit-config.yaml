@@ -1,0 +1,45 @@
+# BundleGames shared pre-commit baseline. Install into each repo as
+# `.pre-commit-config.yaml` via scripts/install-shared-config.sh.
+#
+# Upstream hooks run in every BundleGames repo. The local
+# `forbid-unpinned-github-actions` hook uses scripts/check-action-pins.sh
+# which is also installed by scripts/install-shared-config.sh — keep them
+# in sync.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.28.0
+    hooks:
+      - id: typos
+
+  - repo: local
+    hooks:
+      - id: forbid-unpinned-github-actions
+        name: forbid-unpinned-github-actions
+        entry: scripts/check-action-pins.sh
+        language: system
+        files: ^\.github/workflows/.*\.(yml|yaml)$
