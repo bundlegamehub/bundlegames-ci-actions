@@ -27,6 +27,10 @@ inputs:
     description: Comma-separated additional tags to apply in addition to the git SHA (e.g. "latest,release").
     required: false
     default: ""
+  checkout:
+    description: When "false", skip the internal `actions/checkout`. Set this when the calling job has already checked out and produced build artifacts (e.g. `target/*.jar` from a prior `mvnw-verify` step) that the Dockerfile needs to copy in.
+    required: false
+    default: "true"
 
 outputs:
   image:
@@ -37,6 +41,7 @@ runs:
   using: composite
   steps:
     - name: Checkout
+      if: ${{ inputs.checkout == 'true' }}
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
     - name: Configure AWS credentials (OIDC)
