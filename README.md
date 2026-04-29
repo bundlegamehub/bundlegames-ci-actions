@@ -14,6 +14,7 @@ Today this lives under `shared/packages/` for convenience. The intent is for eac
 | `actions/package-tag-release` | On tag push to a multi-package Unity UPM repo, validate the tagged package's `package.json` version matches the tag suffix. Catches drift. |
 | `actions/unity-edit-mode-tests` | Runs `game-ci/unity-test-runner`. Gated on `UNITY_LICENSE` / `UNITY_EMAIL` / `UNITY_PASSWORD` secrets being present; no-op when they aren't (so the workflow can stay enabled before licensing). |
 | `actions/docker-build-ecr` | Build, tag with git SHA, push to AWS ECR via OIDC. |
+| `actions/aws-ecs-deploy` | Force a fresh rollout of an ECS service (`update-service --force-new-deployment`) via OIDC. Pairs with `docker-build-ecr`. Optional `wait-for-stable` blocks until the service reaches steady state. |
 | `actions/pre-commit-check` | Run `pre-commit run --all-files` with a standardized hook set. |
 | `actions/trivy-scan` | Trivy fs/image vulnerability scan with DB caching, public ECR mirror, optional SARIF upload to GitHub Code Scanning. One pin to bump fleet-wide. |
 
@@ -24,7 +25,9 @@ Today this lives under `shared/packages/` for convenience. The intent is for eac
 - **Narrow permissions.** `permissions: contents: read` unless explicitly documented otherwise.
 - **Editor licensing explicit.** `unity-edit-mode-tests` refuses to run without `UNITY_LICENSE`; consumers can keep the workflow enabled but the job skips with a clean message until licensing lands.
 
-## Consumer example
+## Consumer examples
+
+### CI
 
 ```yaml
 # .github/workflows/ci.yml in a JVM backend repo
@@ -44,6 +47,38 @@ jobs:
       - uses: Rotten-Games/bundlegames-ci-actions/actions/mvnw-verify@v1
         with:
           test-group: integration
+```
+
+### Production deploy (build + rollout)
+
+```yaml
+# .github/workflows/prod.yml — manually triggered ECS rollout
+name: prod-deploy
+on: { workflow_dispatch: {} }
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: Rotten-Games/bundlegames-ci-actions/actions/docker-build-ecr@v1
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          aws-role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          ecr-repository: ${{ secrets.ECR_REPOSITORY }}
+          additional-tags: latest
+
+      - uses: Rotten-Games/bundlegames-ci-actions/actions/aws-ecs-deploy@v1
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          aws-role-arn: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          ecs-cluster: ${{ secrets.ECS_CLUSTER }}
+          ecs-service: ${{ secrets.ECS_SERVICE }}
+          wait-for-stable: "true"
 ```
 
 ## Versioning
