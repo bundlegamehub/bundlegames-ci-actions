@@ -1,0 +1,63 @@
+name: aws-ecs-deploy
+description: >-
+  Force a fresh rollout of an AWS ECS service to pick up the latest container
+  image. Pair with `docker-build-ecr` upstream in the same workflow — that
+  step pushes the image (typically tagged `:latest` plus the git SHA), and
+  this step tells ECS to redeploy.
+
+  Auth via OIDC (no long-lived keys). Returns immediately after the
+  update-service call by default; pass `wait-for-stable: "true"` to block
+  until the service reaches steady state.
+author: BundleGames
+
+inputs:
+  aws-region:
+    description: ECS region.
+    required: true
+  aws-role-arn:
+    description: IAM role ARN with `ecs:UpdateService` (and optionally `ecs:DescribeServices` when waiting) on the target service. Assumed via OIDC.
+    required: true
+  ecs-cluster:
+    description: ECS cluster name.
+    required: true
+  ecs-service:
+    description: ECS service name.
+    required: true
+  wait-for-stable:
+    description: When "true", block until the service reaches steady state. The AWS CLI waiter polls every 15s for up to 40 attempts (~10 minutes by default), and can take longer if waiter settings are overridden via AWS CLI config.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Force ECS rollout
+      shell: bash
+      env:
+        ECS_CLUSTER: ${{ inputs.ecs-cluster }}
+        ECS_SERVICE: ${{ inputs.ecs-service }}
+        WAIT_FOR_STABLE: ${{ inputs.wait-for-stable }}
+      run: |
+        set -euo pipefail
+
+        aws ecs update-service \
+          --cluster "${ECS_CLUSTER}" \
+          --service "${ECS_SERVICE}" \
+          --force-new-deployment \
+          >/dev/null
+
+        echo "Rollout requested for ${ECS_SERVICE} on cluster ${ECS_CLUSTER}."
+
+        if [[ "${WAIT_FOR_STABLE}" == "true" ]]; then
+          echo "Waiting for service to reach steady state..."
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
+          echo "Service is stable."
+        fi
