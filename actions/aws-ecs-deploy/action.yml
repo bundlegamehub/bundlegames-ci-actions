@@ -24,7 +24,7 @@ inputs:
     description: ECS service name.
     required: true
   wait-for-stable:
-    description: When "true", block until the service reaches steady state. Adds 1–5 minutes to the run.
+    description: When "true", block until the service reaches steady state. The AWS CLI waiter polls every 15s for up to 40 attempts (~10 minutes by default), and can take longer if waiter settings are overridden via AWS CLI config.
     required: false
     default: "false"
 
