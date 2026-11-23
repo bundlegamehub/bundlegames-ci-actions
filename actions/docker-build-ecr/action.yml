@@ -31,6 +31,15 @@ inputs:
     description: When "false", skip the internal `actions/checkout`. Set this when the calling job has already checked out and produced build artifacts (e.g. `target/*.jar` from a prior `mvnw-verify` step) that the Dockerfile needs to copy in.
     required: false
     default: "true"
+  platforms:
+    description: >-
+      Target platform(s) for `docker buildx build --platform`
+      (e.g. "linux/amd64", "linux/arm64", or "linux/amd64,linux/arm64" for a
+      multi-arch image). Defaults to amd64 so existing callers are unaffected;
+      a service moving to Graviton passes "linux/arm64" together with flipping
+      its ECS task definition to ARM64.
+    required: false
+    default: "linux/amd64"
 
 outputs:
   image:
@@ -54,6 +63,12 @@ runs:
       id: login
       uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
     - name: Build + push
       id: push
       shell: bash
@@ -61,17 +76,24 @@ runs:
         set -euo pipefail
         registry="${{ steps.login.outputs.registry }}"
         sha="${GITHUB_SHA::12}"
-        primary="${registry}/${{ inputs.ecr-repository }}:${sha}"
+        repo="${registry}/${{ inputs.ecr-repository }}"
+        primary="${repo}:${sha}"
 
-        docker build -f "${{ inputs.dockerfile }}" -t "${primary}" "${{ inputs.build-context }}"
-
-        # Additional tags (optional).
+        # Tag with the git SHA plus any additional tags (e.g. "latest").
+        tags=(-t "${primary}")
         IFS=',' read -ra extras <<<"${{ inputs.additional-tags }}"
         for extra in "${extras[@]}"; do
           extra="$(echo "${extra}" | xargs)"
           [[ -z "${extra}" ]] && continue
-          docker tag "${primary}" "${registry}/${{ inputs.ecr-repository }}:${extra}"
+          tags+=(-t "${repo}:${extra}")
         done
 
-        docker push --all-tags "${registry}/${{ inputs.ecr-repository }}"
+        # buildx: one definition can target amd64 and/or arm64 (Graviton).
+        docker buildx build \
+          --platform "${{ inputs.platforms }}" \
+          -f "${{ inputs.dockerfile }}" \
+          "${tags[@]}" \
+          --push \
+          "${{ inputs.build-context }}"
+
         echo "image=${primary}" >> "$GITHUB_OUTPUT"
